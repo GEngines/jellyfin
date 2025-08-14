@@ -2749,6 +2749,9 @@ namespace Emby.Server.Implementations.Library
             }
 
             var count = filtered.Count;
+            var overrideExternalTheme = _configurationManager.Configuration.OverrideThemeSongLocation
+                && _configurationManager.Configuration.ThemeSongExternalTemplates is { Length: > 0 };
+
             for (var i = 0; i < count; i++)
             {
                 var current = filtered[i];
@@ -2775,11 +2778,26 @@ namespace Emby.Server.Implementations.Library
                 }
                 else if (!current.IsDirectory && _extraResolver.TryGetExtraTypeForOwner(current.FullName, ownerVideoInfo, out var extraType))
                 {
+                    // If overriding theme songs, skip any theme.* files next to media
+                    if (overrideExternalTheme && extraType == ExtraType.ThemeSong)
+                    {
+                        continue;
+                    }
+
                     var extra = GetExtra(current, extraType.Value, false);
                     if (extra is not null)
                     {
                         yield return extra;
                     }
+                }
+            }
+
+            // If configured to override, append external theme songs
+            if (overrideExternalTheme)
+            {
+                foreach (var extra in EnumerateExternalThemeSongs(owner, directoryService))
+                {
+                    yield return extra;
                 }
             }
 
@@ -2808,6 +2826,77 @@ namespace Emby.Server.Implementations.Library
                 extra.OwnerId = owner.Id;
                 extra.IsInMixedFolder = isInMixedFolder;
                 return extra;
+            }
+        }
+
+        private IEnumerable<BaseItem> EnumerateExternalThemeSongs(BaseItem owner, IDirectoryService directoryService)
+        {
+            var templates = _configurationManager.Configuration.ThemeSongExternalTemplates ?? Array.Empty<string>();
+            if (templates.Length == 0)
+            {
+                yield break;
+            }
+
+            var name = owner.Name ?? string.Empty;
+            var year = owner.ProductionYear?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+            owner.TryGetProviderId(MediaBrowser.Model.Entities.MetadataProvider.Imdb, out var imdb);
+            owner.TryGetProviderId(MediaBrowser.Model.Entities.MetadataProvider.Tvdb, out var tvdb);
+
+            var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in templates)
+            {
+                if (string.IsNullOrWhiteSpace(t))
+                {
+                    continue;
+                }
+
+                var path = t
+                    .Replace("{Name}", name, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{Year}", year, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{ImdbId}", imdb ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+                    .Replace("{TvdbId}", tvdb ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+                candidates.Add(path);
+            }
+
+            foreach (var dir in candidates)
+            {
+                var d = directoryService.GetDirectory(dir);
+                if (d is null || !d.Exists)
+                {
+                    continue;
+                }
+
+                foreach (var file in directoryService.GetFiles(d.FullName))
+                {
+                    if (file.IsDirectory)
+                    {
+                        continue;
+                    }
+
+                    var ext = Path.GetExtension(file.FullName);
+                    if (!_namingOptions.AudioFileExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var extra = ResolvePath(_fileSystem.GetFileInfo(file.FullName), directoryService, _extraResolver.GetResolversForExtraType(ExtraType.ThemeSong));
+                    if (extra is not Video && extra is not Audio)
+                    {
+                        continue;
+                    }
+
+                    var itemById = GetItemById(extra.Id);
+                    if (itemById is not null)
+                    {
+                        extra = itemById;
+                    }
+
+                    extra.ExtraType = ExtraType.ThemeSong;
+                    extra.ParentId = Guid.Empty;
+                    extra.OwnerId = owner.Id;
+                    extra.IsInMixedFolder = false;
+                    yield return extra;
+                }
             }
         }
 

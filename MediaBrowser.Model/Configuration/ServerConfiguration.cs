@@ -288,4 +288,20 @@ public class ServerConfiguration : BaseApplicationConfiguration
     /// Gets or sets a value indicating whether old authorization methods are allowed.
     /// </summary>
     public bool EnableLegacyAuthorization { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether Jellyfin should ignore theme songs located next to media (e.g. theme.* and theme-music/)
+    /// and instead resolve theme songs from the external paths defined in ThemeSongExternalTemplates.
+    /// </summary>
+    public bool OverrideThemeSongLocation { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets absolute path templates where Jellyfin should look for theme songs.
+    /// Tokens: {Name}, {Year}, {ImdbId}, {TvdbId}
+    /// Examples:
+    ///   /mnt/user/theme_songs/{Name}
+    ///   /mnt/user/theme_songs/{Name} ({Year})
+    ///   /mnt/user/theme_songs/tvdb-{TvdbId}.
+    /// </summary>
+    public string[] ThemeSongExternalTemplates { get; set; } = Array.Empty<string>();
 }
